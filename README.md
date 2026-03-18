@@ -22,6 +22,10 @@ Built with Streamlit and Groq LLM, it provides a chat-based interface for fast, 
 
 ---
 
+##Run the app on streamlit
+
+https://llm-based-nlp-k85uktrnzjbcdgs7dkcwak.streamlit.app/
+
 ## 🏗️ Architecture
 
 ```
