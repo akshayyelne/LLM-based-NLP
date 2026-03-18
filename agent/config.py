@@ -4,20 +4,8 @@ import logging
 from langchain_groq import ChatGroq
 from agent.settings import GROQ_API_KEY, LLM_MODEL, LLM_TEMPERATURE
 
-# ============================
-
-# Logger
-
-# ============================
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("docs-agent")
-
-# ============================
-
-# LLM Initialization
-
-# ============================
 
 llm = ChatGroq(
 model_name=LLM_MODEL,
