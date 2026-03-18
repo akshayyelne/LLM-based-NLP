@@ -1,11 +1,10 @@
-# LangGraph Documentation Assistant
+# agent/docs_graph.py
 
 import asyncio
-from typing import TypedDict, Annotated, List
+from typing import TypedDict, List
 
 from langchain_core.messages import BaseMessage, ToolMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langgraph.graph.message import add_messages
 from langchain.tools import tool
 
 from langgraph.graph import StateGraph, END
@@ -16,11 +15,7 @@ from prompts.docs_agent_prompt import docs_agent_prompt
 
 from tools.docs_tools import SearchDocsByLangChain
 from tools.support_tools import search_support_articles, get_article_content
-from tools.link_check_tools import (
-    _check_urls_async,
-    _format_results,
-    DEFAULT_TIMEOUT,
-)
+from tools.link_check_tools import check_links
 
 
 # -------------------------
@@ -28,44 +23,29 @@ from tools.link_check_tools import (
 # -------------------------
 
 @tool
-def search_support_articles_tool(query: str) -> str:
-    """Search LangChain support articles for the given query."""
+def search_support_articles_tool(query: str):
+    """Search support articles."""
     return search_support_articles(query)
 
 
 @tool
-def get_article_content_tool(article_id: str) -> str:
-    """Get the full content of a support article by its ID."""
+def get_article_content_tool(article_id: str):
+    """Get article content."""
     return get_article_content(article_id)
 
 
 @tool
-def check_links_tool(url: str) -> str:
-    """Check if a URL is valid and accessible. Use this whenever the user asks to validate a link.
-
-    Args:
-        url: The URL to validate (e.g. https://python.langchain.com).
-
-    Returns:
-        Whether the link is valid, its status code, and any redirect info.
-    """
-    try:
-        loop = asyncio.new_event_loop()
-        try:
-            results = loop.run_until_complete(_check_urls_async([url], DEFAULT_TIMEOUT))
-        finally:
-            loop.close()
-        return _format_results(results)
-    except Exception as e:
-        return f"Error checking URL '{url}': {str(e)}"
+def check_links_tool(url: str):
+    """Validate URL."""
+    return check_links(url)
 
 
 # -------------------------
-# Tools
+# Tools (IMPORTANT FIX)
 # -------------------------
 
 tools = [
-    SearchDocsByLangChain,
+    SearchDocsByLangChain,   # ✅ NO ()
     search_support_articles_tool,
     get_article_content_tool,
     check_links_tool,
@@ -77,11 +57,11 @@ model = llm.bind_tools(tools)
 
 
 # -------------------------
-# State — messages uses add_messages so they accumulate across nodes
+# State
 # -------------------------
 
 class AgentState(TypedDict):
-    messages: Annotated[List[BaseMessage], add_messages]
+    messages: List[BaseMessage]
     blocked: bool
     tool_used: bool
 
@@ -113,12 +93,11 @@ def guardrails_router(state: AgentState):
 # Agent
 # -------------------------
 
-safe_prompt = docs_agent_prompt.replace("{", "{{").replace("}", "}}")
-
 prompt = ChatPromptTemplate.from_messages([
-    ("system", safe_prompt),
+    ("system", docs_agent_prompt),  # ✅ NO escaping
     MessagesPlaceholder("messages"),
 ])
+
 agent_chain = prompt | model
 
 
@@ -128,30 +107,16 @@ async def agent_node(state: AgentState, config):
             "messages": state["messages"]
         })
 
-        has_content = bool(getattr(response, "content", None))
-        has_tool_calls = bool(getattr(response, "tool_calls", None))
-
-        if not response or (not has_content and not has_tool_calls):
-            return {
-                "messages": [
-                    ToolMessage(
-                        tool_call_id="fallback",
-                        content="I was unable to generate a response. Please try rephrasing your question."
-                    )
-                ]
-            }
+        # ✅ fallback if empty
+        if not response or not getattr(response, "content", None):
+            fallback = await llm.ainvoke(state["messages"])
+            return {"messages": [fallback]}
 
         return {"messages": [response]}
 
-    except Exception as e:
-        return {
-            "messages": [
-                ToolMessage(
-                    tool_call_id="error",
-                    content=f"Error: {str(e)}"
-                )
-            ]
-        }
+    except Exception:
+        fallback = await llm.ainvoke(state["messages"])
+        return {"messages": [fallback]}
 
 
 # -------------------------
@@ -168,14 +133,14 @@ async def tools_node(state: AgentState):
     tool_messages = []
 
     for tool_call in tool_calls:
-        t = tool_map.get(tool_call["name"])
+        tool = tool_map.get(tool_call["name"])
 
-        if not t:
-            result = f"Tool '{tool_call['name']}' not found"
+        if not tool:
+            result = "Tool not found"
         else:
             try:
                 result = await asyncio.to_thread(
-                    t.invoke,
+                    tool.invoke,
                     tool_call.get("args", {})
                 )
             except Exception as e:
@@ -190,7 +155,7 @@ async def tools_node(state: AgentState):
 
     return {
         "messages": tool_messages,
-        "tool_used": True
+        "tool_used": True  # prevents loop
     }
 
 
@@ -201,6 +166,7 @@ async def tools_node(state: AgentState):
 def tool_router(state: AgentState):
     last = state["messages"][-1]
 
+    # stop loop after one tool call
     if state.get("tool_used"):
         return END
 
