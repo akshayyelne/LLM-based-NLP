@@ -3,7 +3,7 @@ import logging
 
 from langchain_groq import ChatGroq
 
-from settings import (
+from agent.settings import (
     GROQ_API_KEY,
     LLM_MODEL,
     LLM_TEMPERATURE,
