@@ -2,6 +2,7 @@
 
 import logging
 from langchain_groq import ChatGroq
+
 from agent.settings import GROQ_API_KEY, LLM_MODEL, LLM_TEMPERATURE
 
 logging.basicConfig(level=logging.INFO)
@@ -13,6 +14,6 @@ temperature=LLM_TEMPERATURE,
 groq_api_key=GROQ_API_KEY
 )
 
-logger.info(f"Groq LLM initialized: {LLM_MODEL}")
+logger.info("LLM initialized")
 
 **all** = ["llm", "logger"]
